@@ -5,9 +5,12 @@
 const { execSync, spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const readline = require("readline");
 
 const ROOT = path.resolve(__dirname, "..");
 const SCRIPTS = path.join(ROOT, "scripts");
+const CREDS_DIR = path.join(process.env.HOME || "/tmp", ".nemoclaw");
+const CREDS_FILE = path.join(CREDS_DIR, "credentials.json");
 
 function run(cmd, opts = {}) {
   spawnSync("bash", ["-c", cmd], {
@@ -18,23 +21,122 @@ function run(cmd, opts = {}) {
   });
 }
 
-function needEnv(name) {
-  if (!process.env[name]) {
-    console.error(`${name} is required. Export it and try again.`);
+// ── Credential management ─────────────────────────────────────────
+
+function loadCredentials() {
+  try {
+    if (fs.existsSync(CREDS_FILE)) {
+      return JSON.parse(fs.readFileSync(CREDS_FILE, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function saveCredential(key, value) {
+  fs.mkdirSync(CREDS_DIR, { recursive: true, mode: 0o700 });
+  const creds = loadCredentials();
+  creds[key] = value;
+  fs.writeFileSync(CREDS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 });
+}
+
+function getCredential(key) {
+  // env var takes priority, then saved creds
+  if (process.env[key]) return process.env[key];
+  const creds = loadCredentials();
+  return creds[key] || null;
+}
+
+function prompt(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+async function ensureApiKey() {
+  let key = getCredential("NVIDIA_API_KEY");
+  if (key) {
+    process.env.NVIDIA_API_KEY = key;
+    return;
+  }
+
+  console.log("");
+  console.log("  ┌─────────────────────────────────────────────────────┐");
+  console.log("  │  NVIDIA API Key required                           │");
+  console.log("  │                                                     │");
+  console.log("  │  1. Go to https://build.nvidia.com                 │");
+  console.log("  │  2. Sign in with your NVIDIA account               │");
+  console.log("  │  3. Click any model → 'Get API Key'                │");
+  console.log("  │  4. Paste the key below (starts with nvapi-)       │");
+  console.log("  └─────────────────────────────────────────────────────┘");
+  console.log("");
+
+  key = await prompt("  NVIDIA API Key: ");
+
+  if (!key || !key.startsWith("nvapi-")) {
+    console.error("  Invalid key. Must start with nvapi-");
     process.exit(1);
   }
+
+  saveCredential("NVIDIA_API_KEY", key);
+  process.env.NVIDIA_API_KEY = key;
+  console.log("");
+  console.log("  Key saved to ~/.nemoclaw/credentials.json (mode 600)");
+  console.log("");
+}
+
+async function ensureGithubToken() {
+  let token = getCredential("GITHUB_TOKEN");
+  if (token) {
+    process.env.GITHUB_TOKEN = token;
+    return;
+  }
+
+  // Try gh CLI
+  try {
+    token = execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
+    if (token) {
+      process.env.GITHUB_TOKEN = token;
+      return;
+    }
+  } catch {}
+
+  console.log("");
+  console.log("  ┌─────────────────────────────────────────────────────┐");
+  console.log("  │  GitHub token required (for container images)      │");
+  console.log("  │                                                     │");
+  console.log("  │  Option A: gh auth login (if you have gh CLI)      │");
+  console.log("  │  Option B: Paste a PAT with read:packages scope    │");
+  console.log("  └─────────────────────────────────────────────────────┘");
+  console.log("");
+
+  token = await prompt("  GitHub Token: ");
+
+  if (!token) {
+    console.error("  Token required for deploy.");
+    process.exit(1);
+  }
+
+  saveCredential("GITHUB_TOKEN", token);
+  process.env.GITHUB_TOKEN = token;
+  console.log("");
+  console.log("  Token saved to ~/.nemoclaw/credentials.json (mode 600)");
+  console.log("");
 }
 
 // ── Commands ──────────────────────────────────────────────────────
 
-function setup() {
-  needEnv("NVIDIA_API_KEY");
+async function setup() {
+  await ensureApiKey();
   run(`bash "${SCRIPTS}/setup.sh"`);
 }
 
-function deploy(instanceName) {
-  needEnv("NVIDIA_API_KEY");
-  needEnv("GITHUB_TOKEN");
+async function deploy(instanceName) {
+  await ensureApiKey();
+  await ensureGithubToken();
 
   const name = instanceName || "nemoclaw";
   const gpu = process.env.NEMOCLAW_GPU || "a2-highgpu-1g:nvidia-tesla-a100:1";
@@ -43,7 +145,6 @@ function deploy(instanceName) {
   console.log(`  Deploying NemoClaw to Brev instance: ${name}`);
   console.log("");
 
-  // Check if brev CLI exists
   try {
     execSync("which brev", { stdio: "ignore" });
   } catch {
@@ -51,7 +152,6 @@ function deploy(instanceName) {
     process.exit(1);
   }
 
-  // Check if instance exists
   let exists = false;
   try {
     const out = execSync("brev ls 2>&1", { encoding: "utf-8" });
@@ -65,22 +165,19 @@ function deploy(instanceName) {
     console.log(`  Brev instance '${name}' already exists.`);
   }
 
-  // Wait for SSH
   console.log("  Waiting for SSH...");
   run(`brev shell ${name} -- echo ready`, { stdio: "ignore" });
 
-  // Sync repo to VM
   console.log("  Syncing NemoClaw to VM...");
   run(`brev copy ${name} "${ROOT}" --dest /home/ubuntu/nemoclaw`);
 
-  // Run brev-setup (installs deps + runs setup.sh)
   console.log("  Running brev-setup.sh...");
   run(`brev shell ${name} -- bash -c 'cd /home/ubuntu/nemoclaw && NVIDIA_API_KEY="${process.env.NVIDIA_API_KEY}" GITHUB_TOKEN="${process.env.GITHUB_TOKEN}" bash scripts/brev-setup.sh'`);
 
-  // Start services
-  if (process.env.TELEGRAM_BOT_TOKEN) {
+  const tgToken = getCredential("TELEGRAM_BOT_TOKEN");
+  if (tgToken) {
     console.log("  Starting services...");
-    run(`brev shell ${name} -- bash -c 'cd /home/ubuntu/nemoclaw && NVIDIA_API_KEY="${process.env.NVIDIA_API_KEY}" TELEGRAM_BOT_TOKEN="${process.env.TELEGRAM_BOT_TOKEN}" bash scripts/start-services.sh'`);
+    run(`brev shell ${name} -- bash -c 'cd /home/ubuntu/nemoclaw && NVIDIA_API_KEY="${process.env.NVIDIA_API_KEY}" TELEGRAM_BOT_TOKEN="${tgToken}" bash scripts/start-services.sh'`);
   }
 
   console.log("");
@@ -89,8 +186,8 @@ function deploy(instanceName) {
   console.log("");
 }
 
-function start() {
-  needEnv("NVIDIA_API_KEY");
+async function start() {
+  await ensureApiKey();
   run(`bash "${SCRIPTS}/start-services.sh"`);
 }
 
@@ -113,20 +210,12 @@ function help() {
     nemoclaw stop                  Stop all services
     nemoclaw status                Show service status
 
-  Environment:
-    NVIDIA_API_KEY       Required for setup and deploy
-    GITHUB_TOKEN         Required for deploy (needs read:packages scope)
-    TELEGRAM_BOT_TOKEN   Optional — enables Telegram bridge
-    NEMOCLAW_GPU         Brev GPU type (default: a2-highgpu-1g:nvidia-tesla-a100:1)
+  Credentials are prompted on first use, then saved securely
+  in ~/.nemoclaw/credentials.json (mode 600).
 
   Quick start:
     npm install nemoclaw
-    export NVIDIA_API_KEY=nvapi-...
-    nemoclaw setup
-
-  Deploy to the world:
-    export GITHUB_TOKEN=ghp_...
-    nemoclaw deploy
+    npx nemoclaw setup
 `);
 }
 
@@ -134,18 +223,20 @@ function help() {
 
 const [cmd, ...args] = process.argv.slice(2);
 
-switch (cmd) {
-  case "setup":   setup(); break;
-  case "deploy":  deploy(args[0]); break;
-  case "start":   start(); break;
-  case "stop":    stop(); break;
-  case "status":  status(); break;
-  case "--help":
-  case "-h":
-  case "help":
-  case undefined: help(); break;
-  default:
-    console.error(`Unknown command: ${cmd}`);
-    help();
-    process.exit(1);
-}
+(async () => {
+  switch (cmd) {
+    case "setup":   await setup(); break;
+    case "deploy":  await deploy(args[0]); break;
+    case "start":   await start(); break;
+    case "stop":    stop(); break;
+    case "status":  status(); break;
+    case "--help":
+    case "-h":
+    case "help":
+    case undefined: help(); break;
+    default:
+      console.error(`Unknown command: ${cmd}`);
+      help();
+      process.exit(1);
+  }
+})();
