@@ -14,15 +14,19 @@ NemoClaw is the [OpenClaw](https://openclaw.ai) plugin for [NVIDIA OpenShell](ht
 > should not yet be considered production-ready.
 > We welcome issues and discussion from the community while the project evolves.
 
+---
+
 ## Quick Start
+
+Follow these steps to get started with NemoClaw and your first sandboxed OpenClaw agent.
 
 ### Prerequisites
 
-Check the prerequisites before you start.
+Check the prerequisites before you start to ensure you have the necessary software and hardware to run NemoClaw.
 
 #### Software
 
-- Linux (Ubuntu 24.04)
+- Linux Ubuntu 22.04 LTS releases and later
 - Docker installed and running
 
 #### Hardware
@@ -35,8 +39,6 @@ The installer detects available VRAM and pulls the appropriate model:
 | < 120 GB                         | `nemotron-3-nano:30b`    |
 
 The installer handles all other dependencies, including Node.js, Docker, the OpenShell CLI, and Ollama.
-
----
 
 ### Install NemoClaw and Onboard OpenClaw Agent
 
@@ -92,6 +94,8 @@ Use the OpenClaw CLI to send a single message and print the response:
 ```console
 sandbox@my-assistant:~$ openclaw agent --agent main --local -m "hello" --session-id test
 ```
+
+---
 
 ## How It Works
 
