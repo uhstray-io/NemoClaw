@@ -121,13 +121,13 @@ UPSTREAM = (os.environ.get('DNS_UPSTREAM', '8.8.8.8'), 53)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(('0.0.0.0', 53))
+sock.bind(('10.43.0.10', 53))
 
 with open('/tmp/dns-proxy.pid', 'w') as pf:
     pf.write(str(os.getpid()))
 
 with open('/tmp/dns-proxy.log', 'w') as log:
-    log.write('dns-proxy: 0.0.0.0:53 -> {}:{} pid={}\n'.format(
+    log.write('dns-proxy: 10.43.0.10:53 -> {}:{} pid={}\n'.format(
         UPSTREAM[0], UPSTREAM[1], os.getpid()))
 
 def forward(data, addr):
