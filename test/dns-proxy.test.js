@@ -26,41 +26,34 @@ describe("setup-dns-proxy.sh", () => {
     expect(result.stdout.trim()).toBe("ok");
   });
 
-  it("exits with error when no gateway container is found", () => {
-    // Run the script with a fake docker that returns no containers
+  it("exits with usage when no sandbox name provided", () => {
     const result = spawnSync("bash", ["-lc", `
-      docker() {
-        case "$1" in
-          ps) echo "" ;;
-          *) command docker "$@" 2>/dev/null ;;
-        esac
-      }
-      export -f docker
-      bash "${SETUP_DNS_PROXY}" nonexistent-gateway
+      bash "${SETUP_DNS_PROXY}" nemoclaw
     `], {
       encoding: "utf-8",
-      env: { ...process.env, SETUP_DNS_PROXY, DOCKER_HOST: "unix:///nonexistent" },
+      env: { ...process.env, SETUP_DNS_PROXY },
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr + result.stdout).toMatch(/Could not find/i);
+    expect(result.stderr + result.stdout).toMatch(/Usage:/i);
   });
 
-  it("uses correct iptables DNAT target for sandbox subnet", () => {
-    // Verify the script references the expected sandbox subnet and CoreDNS IP
+  it("references CoreDNS service IP and upstream DNS", () => {
     const content = fs.readFileSync(SETUP_DNS_PROXY, "utf-8");
-    expect(content).toContain('SANDBOX_SUBNET="10.200.0.0/24"');
     expect(content).toContain('COREDNS_SERVICE_IP="10.43.0.10"');
+    expect(content).toContain('DNS_UPSTREAM="8.8.8.8"');
   });
 
-  it("uses idempotent iptables operations", () => {
-    // Verify the script checks before adding rules (iptables -C before -A/-I)
+  it("adds CoreDNS service IP as local address in pod", () => {
     const content = fs.readFileSync(SETUP_DNS_PROXY, "utf-8");
-    expect(content).toContain("iptables -t \"$table\" -C \"$chain\"");
+    expect(content).toContain("ip addr add");
+    expect(content).toContain("COREDNS_SERVICE_IP");
   });
 
-  it("falls back to public DNS when CoreDNS pod IP is unavailable", () => {
+  it("deploys a Python DNS forwarder to the pod", () => {
     const content = fs.readFileSync(SETUP_DNS_PROXY, "utf-8");
-    expect(content).toContain('COREDNS_POD_IP="8.8.8.8"');
+    expect(content).toContain("dns-proxy.py");
+    expect(content).toContain("socket.SOCK_DGRAM");
+    expect(content).toContain("kctl exec");
   });
 });

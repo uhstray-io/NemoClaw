@@ -129,10 +129,6 @@ if [ "$CONTAINER_RUNTIME" != "unknown" ]; then
   bash "$SCRIPT_DIR/fix-coredns.sh" nemoclaw 2>&1 || warn "CoreDNS patch failed (may not be needed)"
 fi
 
-# 2b. DNS routing for sandbox — make CoreDNS reachable from the sandbox network.
-info "Setting up sandbox DNS routing..."
-bash "$SCRIPT_DIR/setup-dns-proxy.sh" nemoclaw 2>&1 || warn "DNS routing setup failed (may not be needed)"
-
 # 3. Providers
 info "Setting up inference providers..."
 
@@ -233,6 +229,10 @@ if ! echo "$SANDBOX_LINE" | grep -q "Ready"; then
   fi
   fail "Sandbox created but not Ready (phase: ${SANDBOX_PHASE:-unknown}). Check 'openshell sandbox get ${SANDBOX_NAME}'."
 fi
+
+# 5b. DNS proxy for sandbox — run after sandbox is Ready.
+info "Setting up sandbox DNS proxy..."
+bash "$SCRIPT_DIR/setup-dns-proxy.sh" nemoclaw "$SANDBOX_NAME" 2>&1 || warn "DNS proxy setup failed (may not be needed)"
 
 # 6. Done
 echo ""

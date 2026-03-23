@@ -468,11 +468,6 @@ async function startGateway(gpu) {
   // Give DNS a moment to propagate
   sleep(5);
 
-  // DNS routing — make CoreDNS reachable from the sandbox network.
-  // The sandbox runs on 10.200.0.0/24 and cannot reach CoreDNS at
-  // 10.43.0.10 without NAT rules on the gateway.
-  console.log("  Setting up sandbox DNS routing...");
-  run(`bash "${path.join(SCRIPTS, "setup-dns-proxy.sh")}" nemoclaw 2>&1 || true`, { ignoreError: true });
 }
 
 // ── Step 3: Sandbox ──────────────────────────────────────────────
@@ -618,6 +613,11 @@ async function createSandbox(gpu) {
     name: sandboxName,
     gpuEnabled: !!gpu,
   });
+
+  // DNS proxy — run a forwarder in the sandbox pod so the isolated
+  // sandbox namespace can resolve DNS. Must run after sandbox is Ready.
+  console.log("  Setting up sandbox DNS proxy...");
+  run(`bash "${path.join(SCRIPTS, "setup-dns-proxy.sh")}" nemoclaw "${sandboxName}" 2>&1 || true`, { ignoreError: true });
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
   return sandboxName;
