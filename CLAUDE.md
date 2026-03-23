@@ -111,14 +111,47 @@ Two critical details:
 6. **OpenClaw** — launch gateway inside sandbox
 7. **Policies** — apply presets from env vars
 
+## Pre-Push Validation
+
+**MANDATORY**: All changes must pass both unit tests AND end-to-end validation before pushing.
+
+### Step 1: Unit Tests
+
+```bash
+npm test    # Must pass with 0 failures
+```
+
+### Step 2: Deploy and Validate
+
+From the `nemoclaw-deploy/` directory:
+
+```bash
+./deploy.sh --onboard    # Full deploy with the change
+./validate.sh            # Must report 15/15 passed
+```
+
+The validation script (`nemoclaw-deploy/validate.sh`) checks:
+- **Infrastructure**: gateway, sandbox, fork source
+- **DNS**: proxy running, external name resolution from sandbox
+- **Inference**: provider configured, agent responds to prompts
+- **Web Search**: GEMINI_API_KEY present, web search returns live results
+- **Policies**: presets enabled
+
+### Rules
+
+1. **Never push if `validate.sh` fails.** Diagnose the root cause first.
+2. **Never add workarounds.** If inference breaks, don't re-create the provider in deploy.sh — find why inference broke (e.g., DNS proxy forwarding to wrong upstream).
+3. **Changes to DNS proxy (`setup-dns-proxy.sh`) are high-risk.** The proxy affects ALL name resolution in the pod, including the `openshell-sandbox` binary's connection to the gateway. Always validate inference AND DNS after changes.
+4. **Changes to `onboard.js` affect the full setup flow.** Test a complete `deploy.sh --onboard` cycle, not just the modified step.
+
 ## Development
 
 ### Testing
 
 ```bash
 npm install
-npm test                           # Run all tests
-npx vitest run test/dns-proxy.test.js  # Run specific test
+npm test                           # Must pass — run all vitest tests
+npx vitest run test/dns-proxy.test.js  # Run specific test file
 ```
 
 Tests use vitest. Shell script tests spawn bash subprocesses. Pre-commit hooks run automatically via prek.
