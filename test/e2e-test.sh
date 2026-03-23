@@ -13,7 +13,10 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 pass() { echo -e "${GREEN}PASS${NC}: $1"; }
-fail() { echo -e "${RED}FAIL${NC}: $1"; exit 1; }
+fail() {
+  echo -e "${RED}FAIL${NC}: $1"
+  exit 1
+}
 info() { echo -e "${YELLOW}TEST${NC}: $1"; }
 
 # -------------------------------------------------------
@@ -25,12 +28,12 @@ openclaw --version && pass "OpenClaw CLI installed" || fail "OpenClaw CLI not fo
 info "2. Verify plugin can be installed"
 # -------------------------------------------------------
 openclaw plugins install /opt/nemoclaw 2>&1 && pass "Plugin installed" || {
-    # If plugins install isn't available, verify the built artifacts exist
-    if [ -f /opt/nemoclaw/dist/index.js ]; then
-        pass "Plugin built successfully (dist/index.js exists)"
-    else
-        fail "Plugin build artifacts missing"
-    fi
+  # If plugins install isn't available, verify the built artifacts exist
+  if [ -f /opt/nemoclaw/dist/index.js ]; then
+    pass "Plugin built successfully (dist/index.js exists)"
+  else
+    fail "Plugin build artifacts missing"
+  fi
 }
 
 # -------------------------------------------------------

@@ -13,11 +13,11 @@ LICENSE="SPDX-License-Identifier: Apache-2.0"
 failed=0
 for file in "$@"; do
   file_head="$(head -n 5 -- "$file")"
-  if ! grep -Fq "$COPYRIGHT" <<< "$file_head"; then
+  if ! grep -Fq "$COPYRIGHT" <<<"$file_head"; then
     echo "Missing SPDX-FileCopyrightText: $file"
     failed=1
   fi
-  if ! grep -Fq "$LICENSE" <<< "$file_head"; then
+  if ! grep -Fq "$LICENSE" <<<"$file_head"; then
     echo "Missing SPDX-License-Identifier: $file"
     failed=1
   fi

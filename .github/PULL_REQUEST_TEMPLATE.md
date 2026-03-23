@@ -16,7 +16,7 @@
 
 ## Testing
 <!-- What testing was done? -->
-- [ ] `make check` passes.
+- [ ] `npx prek run --all-files` passes (or equivalently `make check`).
 - [ ] `npm test` passes.
 - [ ] `make docs` builds without warnings. (for doc-only changes)
 
@@ -28,7 +28,7 @@
 
 ### Code Changes
 <!-- Skip if this is a doc-only PR. -->
-- [ ] `make format` applied (TypeScript and Python).
+- [ ] Formatters applied — `npx prek run --all-files` auto-fixes formatting (or `make format` for targeted runs).
 - [ ] Tests added or updated for new or changed behavior.
 - [ ] No secrets, API keys, or credentials committed.
 - [ ] Doc pages updated for any user-facing behavior changes (new commands, changed defaults, new features, bug fixes that contradict existing docs).

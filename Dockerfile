@@ -1,21 +1,25 @@
 # NemoClaw sandbox image — OpenClaw + NemoClaw plugin inside OpenShell
 
 # Stage 1: Build TypeScript plugin from source
-FROM node:22-slim AS builder
+FROM node:22-slim@sha256:4f77a690f2f8946ab16fe1e791a3ac0667ae1c3575c3e4d0d4589e9ed5bfaf3d AS builder
 COPY nemoclaw/package.json nemoclaw/tsconfig.json /opt/nemoclaw/
 COPY nemoclaw/src/ /opt/nemoclaw/src/
 WORKDIR /opt/nemoclaw
 RUN npm install && npm run build
 
 # Stage 2: Runtime image
-FROM node:22-slim
+FROM node:22-slim@sha256:4f77a690f2f8946ab16fe1e791a3ac0667ae1c3575c3e4d0d4589e9ed5bfaf3d
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv \
-        curl git ca-certificates \
-        iproute2 \
+        python3=3.11.2-1+b1 \
+        python3-pip=23.0.1+dfsg-1 \
+        python3-venv=3.11.2-1+b1 \
+        curl=7.88.1-10+deb12u14 \
+        git=1:2.39.5-0+deb12u3 \
+        ca-certificates=20230311+deb12u1 \
+        iproute2=6.1.0-3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create sandbox user (matches OpenShell convention)
@@ -51,11 +55,9 @@ RUN mkdir -p /sandbox/.openclaw-data/agents/main/agent \
     && ln -s /sandbox/.openclaw-data/update-check.json /sandbox/.openclaw/update-check.json \
     && chown -R sandbox:sandbox /sandbox/.openclaw /sandbox/.openclaw-data
 
-# Install OpenClaw CLI
-RUN npm install -g openclaw@2026.3.11
-
-# Install PyYAML for blueprint runner
-RUN pip3 install --break-system-packages pyyaml
+# Install OpenClaw CLI and PyYAML for blueprint runner (single layer)
+RUN npm install -g openclaw@2026.3.11 \
+    && pip3 install --no-cache-dir --break-system-packages "pyyaml==6.0.3"
 
 # Copy built plugin and blueprint into the sandbox
 COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/

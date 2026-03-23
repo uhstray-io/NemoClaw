@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Full E2E: install → onboard → verify inference (REAL services, no mocks)
 #
 # Proves the COMPLETE user journey including real inference against
@@ -28,11 +31,26 @@ FAIL=0
 SKIP=0
 TOTAL=0
 
-pass() { ((PASS++)); ((TOTAL++)); printf '\033[32m  PASS: %s\033[0m\n' "$1"; }
-fail() { ((FAIL++)); ((TOTAL++)); printf '\033[31m  FAIL: %s\033[0m\n' "$1"; }
-skip() { ((SKIP++)); ((TOTAL++)); printf '\033[33m  SKIP: %s\033[0m\n' "$1"; }
-section() { echo ""; printf '\033[1;36m=== %s ===\033[0m\n' "$1"; }
-info()  { printf '\033[1;34m  [info]\033[0m %s\n' "$1"; }
+pass() {
+  ((PASS++))
+  ((TOTAL++))
+  printf '\033[32m  PASS: %s\033[0m\n' "$1"
+}
+fail() {
+  ((FAIL++))
+  ((TOTAL++))
+  printf '\033[31m  FAIL: %s\033[0m\n' "$1"
+}
+skip() {
+  ((SKIP++))
+  ((TOTAL++))
+  printf '\033[33m  SKIP: %s\033[0m\n' "$1"
+}
+section() {
+  echo ""
+  printf '\033[1;36m=== %s ===\033[0m\n' "$1"
+}
+info() { printf '\033[1;34m  [info]\033[0m %s\n' "$1"; }
 
 # Parse chat completion response — handles both content and reasoning_content
 # (nemotron-3-super is a reasoning model that may put output in reasoning_content)
@@ -67,10 +85,10 @@ SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-nightly}"
 # ══════════════════════════════════════════════════════════════════
 section "Phase 0: Pre-cleanup"
 info "Destroying any leftover sandbox/gateway from previous runs..."
-if command -v nemoclaw > /dev/null 2>&1; then
+if command -v nemoclaw >/dev/null 2>&1; then
   nemoclaw "$SANDBOX_NAME" destroy 2>/dev/null || true
 fi
-if command -v openshell > /dev/null 2>&1; then
+if command -v openshell >/dev/null 2>&1; then
   openshell sandbox delete "$SANDBOX_NAME" 2>/dev/null || true
   openshell gateway destroy -g nemoclaw 2>/dev/null || true
 fi
@@ -81,7 +99,7 @@ pass "Pre-cleanup complete"
 # ══════════════════════════════════════════════════════════════════
 section "Phase 1: Prerequisites"
 
-if docker info > /dev/null 2>&1; then
+if docker info >/dev/null 2>&1; then
   pass "Docker is running"
 else
   fail "Docker is not running — cannot continue"
@@ -95,7 +113,7 @@ else
   exit 1
 fi
 
-if curl -sf --max-time 10 https://integrate.api.nvidia.com/v1/models > /dev/null 2>&1; then
+if curl -sf --max-time 10 https://integrate.api.nvidia.com/v1/models >/dev/null 2>&1; then
   pass "Network access to integrate.api.nvidia.com"
 else
   fail "Cannot reach integrate.api.nvidia.com"
@@ -112,7 +130,10 @@ fi
 # ══════════════════════════════════════════════════════════════════
 section "Phase 2: Install nemoclaw (non-interactive mode)"
 
-cd "$REPO" || { fail "Could not cd to repo root: $REPO"; exit 1; }
+cd "$REPO" || {
+  fail "Could not cd to repo root: $REPO"
+  exit 1
+}
 
 info "Running install.sh --non-interactive..."
 info "This installs Node.js, openshell, NemoClaw, and runs onboard."
@@ -122,7 +143,7 @@ INSTALL_LOG="/tmp/nemoclaw-e2e-install.log"
 # Write to a file instead of piping through tee. openshell's background
 # port-forward inherits pipe file descriptors, which prevents tee from exiting.
 # Use tail -f in the background for real-time output in CI logs.
-bash install.sh --non-interactive > "$INSTALL_LOG" 2>&1 &
+bash install.sh --non-interactive >"$INSTALL_LOG" 2>&1 &
 install_pid=$!
 tail -f "$INSTALL_LOG" --pid=$install_pid 2>/dev/null &
 tail_pid=$!
@@ -151,7 +172,7 @@ else
 fi
 
 # Verify nemoclaw is on PATH
-if command -v nemoclaw > /dev/null 2>&1; then
+if command -v nemoclaw >/dev/null 2>&1; then
   pass "nemoclaw installed at $(command -v nemoclaw)"
 else
   fail "nemoclaw not found on PATH after install"
@@ -159,14 +180,14 @@ else
 fi
 
 # Verify openshell was installed
-if command -v openshell > /dev/null 2>&1; then
+if command -v openshell >/dev/null 2>&1; then
   pass "openshell installed ($(openshell --version 2>&1 || echo unknown))"
 else
   fail "openshell not found on PATH after install"
   exit 1
 fi
 
-nemoclaw --help > /dev/null 2>&1 \
+nemoclaw --help >/dev/null 2>&1 \
   && pass "nemoclaw --help exits 0" \
   || fail "nemoclaw --help failed"
 
@@ -249,11 +270,11 @@ info "[LIVE] Sandbox inference test → user → sandbox → gateway → NVIDIA 
 ssh_config="$(mktemp)"
 sandbox_response=""
 
-if openshell sandbox ssh-config "$SANDBOX_NAME" > "$ssh_config" 2>/dev/null; then
+if openshell sandbox ssh-config "$SANDBOX_NAME" >"$ssh_config" 2>/dev/null; then
   # Use timeout if available (Linux, Homebrew), fall back to plain ssh
   TIMEOUT_CMD=""
-  command -v timeout > /dev/null 2>&1 && TIMEOUT_CMD="timeout 90"
-  command -v gtimeout > /dev/null 2>&1 && TIMEOUT_CMD="gtimeout 90"
+  command -v timeout >/dev/null 2>&1 && TIMEOUT_CMD="timeout 90"
+  command -v gtimeout >/dev/null 2>&1 && TIMEOUT_CMD="gtimeout 90"
   sandbox_response=$($TIMEOUT_CMD ssh -F "$ssh_config" \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
@@ -263,7 +284,7 @@ if openshell sandbox ssh-config "$SANDBOX_NAME" > "$ssh_config" 2>/dev/null; the
     "curl -s --max-time 60 https://inference.local/v1/chat/completions \
       -H 'Content-Type: application/json' \
       -d '{\"model\":\"nvidia/nemotron-3-super-120b-a12b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly one word: PONG\"}],\"max_tokens\":100}'" \
-  2>&1) || true
+    2>&1) || true
 fi
 rm -f "$ssh_config"
 

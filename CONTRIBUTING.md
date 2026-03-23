@@ -18,6 +18,7 @@ Install the following before you begin.
 - Python 3.11+ (for blueprint and documentation builds)
 - Docker (running)
 - [uv](https://docs.astral.sh/uv/) (for Python dependency management)
+- [hadolint](https://github.com/hadolint/hadolint) (Dockerfile linter — `brew install hadolint` on macOS)
 
 ## Getting Started
 
@@ -70,6 +71,8 @@ All git hooks are managed by [prek](https://prek.j178.dev/), a fast, single-bina
 | **pre-push** | TypeScript type check (`tsc --noEmit`), Pyright (Python) |
 
 For a full manual check: `npx prek run --all-files`. For scoped runs: `npx prek run --from-ref <base> --to-ref HEAD`.
+
+If you still have `core.hooksPath` set from an old Husky setup, Git will ignore `.git/hooks`. Run `git config --unset core.hooksPath` in this repo, then `npm install` so `prek install` (via `prepare`) can register the hooks.
 
 `make check` remains the primary documented linter entry point.
 
