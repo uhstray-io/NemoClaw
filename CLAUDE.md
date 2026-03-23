@@ -23,11 +23,12 @@ This fork adds DNS resolution support for the sandbox. Upstream NemoClaw has a k
 
 ## Approach to Changes
 
+- **Foundational fixes only** — fix root causes, never add workarounds. If something breaks, diagnose why before patching. The inference 503 was caused by DNS forwarding to `8.8.8.8` (which can't resolve k8s-internal names), not by a provider credential issue. Always find the root cause.
 - **Follow upstream conventions** — match the repo's code style, security principles, and design patterns.
 - **Use OpenShell mechanisms** — work with OpenShell's proxy, policies, providers, and blueprints. Don't bypass them.
 - **Configuration over code** — prefer config changes to code-level workarounds.
 - **No secrets in this repo** — it's public. Secrets belong in the deployment repo (nemoclaw-deploy).
-- **Keep changes minimal** — only fix the DNS issue. Don't refactor unrelated code.
+- **Test before pushing** — verify inference, DNS, and web_search all work via `deploy.sh --onboard` before committing.
 
 ## Architecture
 
@@ -92,7 +93,11 @@ The sandbox process can only reach `10.200.0.1`. All HTTP/HTTPS goes through the
 4. Writes `/tmp/dns-proxy.py` — a minimal Python UDP DNS forwarder
 5. Launches it via `docker exec -d $CLUSTER nsenter -t $PID -n -m -- python3 /tmp/dns-proxy.py`
 
-The forwarder binds to `10.43.0.10:53` (NOT `0.0.0.0`). This is critical: glibc's resolver uses connected UDP sockets that discard responses from unexpected source IPs. If bound to `0.0.0.0`, responses come from `10.200.0.1` and glibc ignores them.
+Two critical details:
+
+1. **Bind to `10.43.0.10`** (NOT `0.0.0.0`): glibc's resolver uses connected UDP sockets that discard responses from unexpected source IPs. If bound to `0.0.0.0`, responses come from `10.200.0.1` and glibc ignores them.
+
+2. **Forward to the CoreDNS pod IP** (NOT `8.8.8.8`): the `openshell-sandbox` binary in the pod namespace also uses DNS to reach the gateway (`openshell-0.openshell.svc.cluster.local`). Since we add `10.43.0.10` as a local address, ALL DNS in the pod goes through our proxy — including k8s-internal names. Public DNS can't resolve `*.svc.cluster.local`, so forwarding to `8.8.8.8` breaks inference routing. CoreDNS handles both k8s names (kubernetes plugin) and external names (forward plugin).
 
 ### Onboard Flow
 
