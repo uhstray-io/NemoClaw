@@ -163,7 +163,9 @@ resolve_coredns_upstream() {
     return 0
   fi
 
-  return 1
+  # Last resort: public DNS. Needed on hosts where all nameservers are
+  # loopback (e.g. systemd-resolved uses 127.0.0.53).
+  printf '8.8.8.8\n'
 }
 
 select_openshell_cluster_container() {

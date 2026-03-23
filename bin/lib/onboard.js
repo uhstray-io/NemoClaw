@@ -459,14 +459,15 @@ async function startGateway(gpu) {
     sleep(2);
   }
 
-  // CoreDNS fix — always run. k3s-inside-Docker has broken DNS on all platforms.
+  // CoreDNS fix — k3s-inside-Docker has broken DNS forwarding on all platforms.
   const runtime = getContainerRuntime();
   if (shouldPatchCoredns(runtime)) {
-    console.log("  Patching CoreDNS for Colima...");
+    console.log("  Patching CoreDNS DNS forwarding...");
     run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw 2>&1 || true`, { ignoreError: true });
   }
   // Give DNS a moment to propagate
   sleep(5);
+
 }
 
 // ── Step 3: Sandbox ──────────────────────────────────────────────
@@ -612,6 +613,11 @@ async function createSandbox(gpu) {
     name: sandboxName,
     gpuEnabled: !!gpu,
   });
+
+  // DNS proxy — run a forwarder in the sandbox pod so the isolated
+  // sandbox namespace can resolve DNS. Must run after sandbox is Ready.
+  console.log("  Setting up sandbox DNS proxy...");
+  run(`bash "${path.join(SCRIPTS, "setup-dns-proxy.sh")}" nemoclaw "${sandboxName}" 2>&1 || true`, { ignoreError: true });
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
   return sandboxName;
