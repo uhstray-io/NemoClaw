@@ -41,7 +41,7 @@ fi
 
 # CoreDNS service IP that the sandbox's /etc/resolv.conf points to
 COREDNS_SERVICE_IP="10.43.0.10"
-DNS_UPSTREAM="8.8.8.8"
+# DNS_UPSTREAM is set below after we discover the CoreDNS pod IP
 
 # ── Find the gateway container ──────────────────────────────────────
 
@@ -68,6 +68,22 @@ fi
 kctl() {
   docker exec "$CLUSTER" kubectl "$@"
 }
+
+# ── Discover CoreDNS pod IP ─────────────────────────────────────────
+#
+# Forward to CoreDNS (not 8.8.8.8) so k8s-internal names like
+# openshell-0.openshell.svc.cluster.local still resolve. CoreDNS
+# handles both k8s names (kubernetes plugin) and external names
+# (forward plugin, patched by fix-coredns.sh).
+
+DNS_UPSTREAM="$(kctl get endpoints kube-dns \
+  -n kube-system -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+
+if [ -z "$DNS_UPSTREAM" ]; then
+  echo "WARNING: Could not discover CoreDNS pod IP. Falling back to 8.8.8.8."
+  echo "WARNING: k8s-internal names (inference.local routing) will NOT work."
+  DNS_UPSTREAM="8.8.8.8"
+fi
 
 # ── Find the sandbox pod and its PID ────────────────────────────────
 
@@ -114,10 +130,10 @@ kctl exec -n openshell "$POD" -- \
 
 # ── Step 2: Write DNS proxy script to the pod ───────────────────────
 
-kctl exec -n openshell "$POD" -- sh -c "cat > /tmp/dns-proxy.py << 'DNSPROXY'
+kctl exec -n openshell "$POD" -- sh -c "cat > /tmp/dns-proxy.py << DNSPROXY
 import socket, threading, os
 
-UPSTREAM = (os.environ.get('DNS_UPSTREAM', '8.8.8.8'), 53)
+UPSTREAM = ('${DNS_UPSTREAM}', 53)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
