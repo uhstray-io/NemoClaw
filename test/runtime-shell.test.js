@@ -170,6 +170,17 @@ describe("shell runtime helpers", () => {
     expect(result.stdout.trim()).toBe("9.9.9.9");
   });
 
+  it("falls back to public DNS when all nameservers are loopback", () => {
+    const result = runShell(
+      `source "${RUNTIME_SH}";
+       get_colima_vm_nameserver() { return 1; }
+       resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 127.0.0.53' unknown`,
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("8.8.8.8");
+  });
+
   it("does not consume installer stdin when reading the Colima VM nameserver", () => {
     const result = runShell(
       `function colima() { cat > /dev/null || true; printf 'nameserver 100.100.100.100\\n'; }

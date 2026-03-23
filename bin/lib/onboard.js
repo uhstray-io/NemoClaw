@@ -459,14 +459,20 @@ async function startGateway(gpu) {
     sleep(2);
   }
 
-  // CoreDNS fix — always run. k3s-inside-Docker has broken DNS on all platforms.
+  // CoreDNS fix — k3s-inside-Docker has broken DNS forwarding on all platforms.
   const runtime = getContainerRuntime();
   if (shouldPatchCoredns(runtime)) {
-    console.log("  Patching CoreDNS for Colima...");
+    console.log("  Patching CoreDNS DNS forwarding...");
     run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw 2>&1 || true`, { ignoreError: true });
   }
   // Give DNS a moment to propagate
   sleep(5);
+
+  // DNS routing — make CoreDNS reachable from the sandbox network.
+  // The sandbox runs on 10.200.0.0/24 and cannot reach CoreDNS at
+  // 10.43.0.10 without NAT rules on the gateway.
+  console.log("  Setting up sandbox DNS routing...");
+  run(`bash "${path.join(SCRIPTS, "setup-dns-proxy.sh")}" nemoclaw 2>&1 || true`, { ignoreError: true });
 }
 
 // ── Step 3: Sandbox ──────────────────────────────────────────────
