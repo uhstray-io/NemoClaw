@@ -119,5 +119,33 @@ describe("policies", () => {
         expect(content.includes("network_policies:")).toBeTruthy();
       }
     });
+
+    it("package-manager presets use access: full (not tls: terminate)", () => {
+      // Package managers (pip, npm, yarn) use CONNECT tunneling which breaks
+      // under tls: terminate. Ensure these presets use access: full like the
+      // github policy in openclaw-sandbox.yaml.
+      const packagePresets = ["pypi", "npm"];
+      for (const name of packagePresets) {
+        const content = policies.loadPreset(name);
+        expect(content).toBeTruthy();
+        expect(content.includes("tls: terminate")).toBe(false);
+        expect(content.includes("access: full")).toBe(true);
+      }
+    });
+
+    it("package-manager presets include binaries section", () => {
+      // Without binaries, the proxy can't match pip/npm traffic to the policy
+      // and returns 403.
+      const packagePresets = [
+        { name: "pypi", expectedBinary: "python" },
+        { name: "npm", expectedBinary: "npm" },
+      ];
+      for (const { name, expectedBinary } of packagePresets) {
+        const content = policies.loadPreset(name);
+        expect(content).toBeTruthy();
+        expect(content.includes("binaries:")).toBe(true);
+        expect(content.includes(expectedBinary)).toBe(true);
+      }
+    });
   });
 });
