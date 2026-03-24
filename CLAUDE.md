@@ -24,6 +24,7 @@ This fork adds DNS resolution support for the sandbox. Upstream NemoClaw has a k
 ## Approach to Changes
 
 - **Foundational fixes only** — fix root causes, never add workarounds. If something breaks, diagnose why before patching. The inference 503 was caused by DNS forwarding to `8.8.8.8` (which can't resolve k8s-internal names), not by a provider credential issue. Always find the root cause.
+- **No runtime config patching** — never modify `openclaw.json` or other locked files at runtime via kubectl exec, nsenter, or chmod hacks. Configure at build time in the Dockerfile. For new integrations (Discord, Slack, etc.), add the channel definition to the Dockerfile's config generator with `"token": {"source": "env"}` — the channel activates only when the env var is present.
 - **Follow upstream conventions** — match the repo's code style, security principles, and design patterns.
 - **Use OpenShell mechanisms** — work with OpenShell's proxy, policies, providers, and blueprints. Don't bypass them.
 - **Configuration over code** — prefer config changes to code-level workarounds.
@@ -98,6 +99,22 @@ Two critical details:
 1. **Bind to `10.43.0.10`** (NOT `0.0.0.0`): glibc's resolver uses connected UDP sockets that discard responses from unexpected source IPs. If bound to `0.0.0.0`, responses come from `10.200.0.1` and glibc ignores them.
 
 2. **Forward to the CoreDNS pod IP** (NOT `8.8.8.8`): the `openshell-sandbox` binary in the pod namespace also uses DNS to reach the gateway (`openshell-0.openshell.svc.cluster.local`). Since we add `10.43.0.10` as a local address, ALL DNS in the pod goes through our proxy — including k8s-internal names. Public DNS can't resolve `*.svc.cluster.local`, so forwarding to `8.8.8.8` breaks inference routing. CoreDNS handles both k8s names (kubernetes plugin) and external names (forward plugin).
+
+### Channel Integrations (Discord, Slack, Telegram)
+
+Channel configs are defined in the Dockerfile's `openclaw.json` generator (the `channels` dict). Each channel reads its token from an environment variable at runtime:
+
+```python
+'discord': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'}, ...}
+```
+
+The channel only activates when the env var is set in `/sandbox/.env`. To add a new channel:
+1. Add the config entry to the Dockerfile's `channels` dict
+2. Add the secret file to `nemoclaw-deploy/` (e.g., `discord-bot-token.txt`)
+3. Update `deploy.sh` to read the file and inject it into `/sandbox/.env`
+4. The corresponding network policy preset must be enabled in `sandboxes.json`
+
+Never modify `openclaw.json` at runtime. Rebuild via `deploy.sh --onboard`.
 
 ### Onboard Flow
 

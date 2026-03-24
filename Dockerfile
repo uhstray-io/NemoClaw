@@ -127,8 +127,6 @@ config = { \
     'channels': { \
         'defaults': {'configWrites': False}, \
         'discord': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'}, 'dmPolicy': 'pairing', 'groupPolicy': 'allowlist'}, \
-        'slack': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'SLACK_BOT_TOKEN'}}, \
-        'telegram': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'TELEGRAM_BOT_TOKEN'}}, \
     }, \
     'gateway': { \
         'mode': 'local', \
