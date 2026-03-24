@@ -7,7 +7,7 @@ Fork of [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) with sandbox DNS f
 
 ## What This Fork Changes
 
-This fork adds DNS resolution support for the sandbox. Upstream NemoClaw has a known issue ([#626](https://github.com/NVIDIA/NemoClaw/issues/626)) where `dns.lookup()` fails inside the sandbox because the CoreDNS service IP is unreachable from the isolated network namespace.
+DNS resolution fix + channel integration support. Upstream NemoClaw has a known DNS issue ([#626](https://github.com/NVIDIA/NemoClaw/issues/626)). Our upstream PR: [#732](https://github.com/NVIDIA/NemoClaw/pull/732).
 
 ### Changes from upstream
 
@@ -19,7 +19,9 @@ This fork adds DNS resolution support for the sandbox. Upstream NemoClaw has a k
 | `bin/lib/platform.js` | `shouldPatchCoredns()` returns true for all runtimes |
 | `bin/lib/onboard.js` | Calls `setup-dns-proxy.sh` after sandbox creation |
 | `scripts/setup.sh` | Calls `setup-dns-proxy.sh` after sandbox Ready check |
+| `Dockerfile` | Loads channel configs from `nemoclaw-blueprint/config/*.json` at build time |
 | `.pre-commit-config.yaml` | Added `pytest` to Pyright hook dependencies |
+| `CLAUDE.md` | **New** — fork-specific development docs |
 
 ## Approach to Changes
 
