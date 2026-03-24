@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# Fixed discord preset: use access: full for CONNECT tunnel compatibility.
+# Upstream uses tls: terminate which causes 403 on HTTPS CONNECT tunnels.
+# See: https://github.com/NVIDIA/NemoClaw/issues/685
+
 preset:
   name: discord
   description: "Discord API, gateway, and CDN access"
@@ -11,24 +15,14 @@ network_policies:
     endpoints:
       - host: discord.com
         port: 443
-        protocol: rest
-        enforcement: enforce
-        tls: terminate
-        rules:
-          - allow: { method: GET, path: "/**" }
-          - allow: { method: POST, path: "/**" }
+        access: full
       - host: gateway.discord.gg
         port: 443
-        protocol: rest
-        enforcement: enforce
-        tls: terminate
-        rules:
-          - allow: { method: GET, path: "/**" }
-          - allow: { method: POST, path: "/**" }
+        access: full
       - host: cdn.discordapp.com
         port: 443
-        protocol: rest
-        enforcement: enforce
-        tls: terminate
-        rules:
-          - allow: { method: GET, path: "/**" }
+        access: full
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/local/bin/openclaw }
+      - { path: /usr/bin/curl }
