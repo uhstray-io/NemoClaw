@@ -74,7 +74,7 @@ Pod namespace (root):
   - eth0: 10.42.0.x (k8s pod network, can reach internet)
   - veth-h-*: 10.200.0.1 (gateway side of sandbox veth)
   - lo: 127.0.0.1 + 10.43.0.10 (added by setup-dns-proxy.sh)
-  - DNS forwarder on 10.43.0.10:53 → 8.8.8.8:53
+  - DNS forwarder on 10.43.0.10:53 → CoreDNS pod IP:53
 
 Sandbox namespace (nested, isolated):
   - veth-s-*: 10.200.0.2 (only interface)
@@ -104,19 +104,16 @@ Two critical details:
 
 ### Channel Integrations (Discord, Slack, Telegram)
 
-Channel configs are defined in the Dockerfile's `openclaw.json` generator (the `channels` dict). Each channel reads its token from an environment variable at runtime:
+The Dockerfile reads channel configs from `nemoclaw-blueprint/config/*.json` at build time (e.g., `discord.json`). The token is always injected via env var at runtime — never baked into the image.
 
-```python
-'discord': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'}, ...}
-```
+To add a new channel:
+1. Create `config/<channel>.json` in `nemoclaw-deploy/` with guild/user config
+2. deploy.sh syncs it to `nemoclaw-blueprint/config/` before build
+3. The Dockerfile merges it into `openclaw.json` with `"token": {"source": "env"}`
+4. Add the secret `.txt` file and the policy preset to `sandboxes.json`
+5. Run `deploy.sh --onboard` to rebuild the image
 
-The channel only activates when the env var is set in `/sandbox/.env`. To add a new channel:
-1. Add the config entry to the Dockerfile's `channels` dict
-2. Add the secret file to `nemoclaw-deploy/` (e.g., `discord-bot-token.txt`)
-3. Update `deploy.sh` to read the file and inject it into `/sandbox/.env`
-4. The corresponding network policy preset must be enabled in `sandboxes.json`
-
-Never modify `openclaw.json` at runtime. Rebuild via `deploy.sh --onboard`.
+Never modify `openclaw.json` at runtime.
 
 ### Onboard Flow
 
@@ -145,8 +142,8 @@ npm test    # Must pass with 0 failures
 From the `nemoclaw-deploy/` directory:
 
 ```bash
-./deploy.sh --onboard    # Full deploy with the change
-./validate.sh            # Must report 15/15 passed
+./deploy.sh --local --onboard    # Full deploy with the change
+./validate.sh --local            # Must report 14/14 passed
 ```
 
 The validation script (`nemoclaw-deploy/validate.sh`) checks:
