@@ -124,10 +124,8 @@ config = { \
             'models': [{'id': model, 'name': model, 'reasoning': False, 'input': ['text'], 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}, 'contextWindow': 131072, 'maxTokens': 4096}] \
         } \
     }}, \
-    'channels': { \
-        'defaults': {'configWrites': False}, \
-        'discord': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'}, 'dmPolicy': 'pairing', 'groupPolicy': 'allowlist'}, \
-    }, \
+    'channels': dict({'defaults': {'configWrites': False}}, \
+        **{'discord': dict(json.load(open('/opt/nemoclaw-blueprint/config/discord.json')), token={'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'})} if os.path.exists('/opt/nemoclaw-blueprint/config/discord.json') else {'discord': {'enabled': True, 'token': {'source': 'env', 'provider': 'default', 'id': 'DISCORD_BOT_TOKEN'}, 'dmPolicy': 'pairing', 'groupPolicy': 'allowlist'}}), \
     'gateway': { \
         'mode': 'local', \
         'controlUi': { \
