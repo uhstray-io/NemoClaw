@@ -813,13 +813,18 @@ def build_config(env: dict | None = None) -> dict:
             "loopbackMode": "proxy",
         }
 
-    # Keep keyless web_fetch available by default, but force it through the
-    # trusted env proxy. OpenShell's L7 policy remains the egress authority:
-    # without an approved host:port, the proxy denies the request. Remove this
-    # default only if OpenClaw gains a first-class least-privilege web_fetch
-    # policy that can preserve host-gateway fetch without bypassing OpenShell.
+    # Keep keyless web_fetch available by default, forced through the trusted
+    # env proxy. OpenShell's L7 policy remains the egress authority: without an
+    # approved host:port the proxy denies the request (the web_fetch allowlist).
+    #
+    # readability=True gives web_fetch a LOCAL, keyless content-extraction path.
+    # Without it — and with no fetch provider — OpenClaw 2026.5.x does not expose
+    # web_fetch as a callable agent tool ("openclaw.tools.web_fetch is not a
+    # function" / "Readability disabled and no fetch provider is available"), so
+    # the agent cannot fetch even allow-listed URLs. This keeps fetch keyless
+    # (no Firecrawl/provider API key) while honoring the egress allowlist.
     tools_web = config.setdefault("tools", {}).setdefault("web", {})
-    tools_web["fetch"] = {"enabled": True, "useTrustedEnvProxy": True}
+    tools_web["fetch"] = {"enabled": True, "useTrustedEnvProxy": True, "readability": True}
 
     if env.get("NEMOCLAW_WEB_SEARCH_ENABLED", "") == "1":
         # OpenClaw 2026.5.x moved provider-owned web-search config (the API key)
