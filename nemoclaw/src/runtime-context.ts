@@ -81,7 +81,7 @@ function buildNetworkLines(web: WebToolAccess): string[] {
   }
   if (web.fetchEnabled) {
     lines.push(
-      "web_fetch is allowlist-only: it may ONLY retrieve operator-approved (allow-listed) URLs — never attempt arbitrary URLs; a denied fetch means the host is not on the allowlist (ask the operator to add it in OpenShell)",
+      "web_fetch is allowlist-only: it may ONLY reach operator-approved (allow-listed) hosts — never attempt arbitrary URLs. Distinguish two failure modes: (a) a POLICY denial — the proxy blocks the connection before it reaches the site — means the host is NOT allow-listed; ask the operator to add it. (b) An error returned BY THE SITE itself (e.g. HTTP 403, or a Cloudflare/WAF 'Just a moment' challenge page) means the host IS allow-listed and reachable, and the site's own bot protection blocked the request — report that, and do NOT ask to allow-list a host that is already allowed",
     );
   }
   return lines;
@@ -135,7 +135,7 @@ function buildRuntimeContextText(summary: RuntimeSummary): string {
     "Behavior:",
     "- Use the tools listed under Network policy (e.g. web_search / web_fetch) instead of assuming you have no access.",
     "- Do not claim unrestricted host or internet access; only the listed tools and allow-listed hosts are reachable.",
-    "- web_fetch only works for allow-listed URLs; if a request is blocked, say it is blocked and ask the operator to adjust the allowlist/policy in OpenShell.",
+    "- For web_fetch, separate a proxy/policy denial (host not allow-listed → ask the operator to add it) from a site-returned 403 / Cloudflare challenge (the host IS allow-listed and reachable; the site blocked the request — report that, do not ask to allow-list an already-allowed host).",
     "</nemoclaw-runtime>",
   ].filter((line): line is string => Boolean(line));
   return lines.join("\n");
