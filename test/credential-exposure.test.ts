@@ -1,0 +1,149 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Security regression test: credential values must never appear in --credential
+// CLI arguments. OpenShell reads credential values from the environment when
+// only the env-var name is passed (e.g. --credential "NVIDIA_API_KEY"), so
+// there is no reason to pass the secret itself on the command line where it
+// would be visible in `ps aux` output.
+
+import { createRequire } from "node:module";
+import { describe, it, expect } from "vitest";
+import { buildSubprocessEnv as buildCliSubprocessEnv } from "../src/lib/subprocess-env";
+import {
+  buildSubprocessEnv as buildPluginSubprocessEnv,
+  withLocalNoProxy as withPluginLocalNoProxy,
+} from "../nemoclaw/src/lib/subprocess-env";
+import { withLocalNoProxy as withCliLocalNoProxy } from "../src/lib/subprocess-env";
+import { getCurlTimingArgs } from "../src/lib/adapters/http/probe";
+
+const require = createRequire(import.meta.url);
+const { buildProviderArgs } = require("../dist/lib/onboard/providers.js") as {
+  buildProviderArgs: (
+    action: "create" | "update",
+    name: string,
+    type: string,
+    credentialEnv: string,
+    baseUrl: string | null,
+  ) => string[];
+};
+
+describe("credential exposure in process arguments", () => {
+  it("onboard.js --credential flags pass env var names only", () => {
+    const args = buildProviderArgs(
+      "create",
+      "inference",
+      "openai",
+      "NVIDIA_API_KEY",
+      "https://api.example.test/v1",
+    );
+
+    expect(args).toContain("--credential");
+    expect(args).toContain("NVIDIA_API_KEY");
+    expect(args.join(" ")).not.toContain("NVIDIA_API_KEY=");
+    expect(args.join(" ")).not.toContain("nvapi-");
+  });
+
+  it("subprocess-env TLS allowlist includes git, curl, and python CA vars (#2270)", () => {
+    const tlsEnv = {
+      GIT_SSL_CAINFO: "/tmp/git-ca.pem",
+      GIT_SSL_CAPATH: "/tmp/git-ca-dir",
+      CURL_CA_BUNDLE: "/tmp/curl-ca.pem",
+      REQUESTS_CA_BUNDLE: "/tmp/requests-ca.pem",
+    };
+    const previous = Object.fromEntries(
+      Object.keys(tlsEnv).map((key) => [key, process.env[key]] as const),
+    );
+    try {
+      Object.assign(process.env, tlsEnv);
+      for (const buildSubprocessEnv of [buildCliSubprocessEnv, buildPluginSubprocessEnv]) {
+        const env = buildSubprocessEnv();
+        expect(Object.fromEntries(Object.keys(tlsEnv).map((key) => [key, env[key]]))).toEqual(
+          tlsEnv,
+        );
+      }
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
+  it("subprocess-env TLS allowlists in CLI and plugin are in sync (#2270)", () => {
+    const tlsEnv = {
+      GIT_SSL_CAINFO: "/tmp/git-ca.pem",
+      GIT_SSL_CAPATH: "/tmp/git-ca-dir",
+      CURL_CA_BUNDLE: "/tmp/curl-ca.pem",
+      REQUESTS_CA_BUNDLE: "/tmp/requests-ca.pem",
+    };
+    const previous = Object.fromEntries(
+      Object.keys(tlsEnv).map((key) => [key, process.env[key]] as const),
+    );
+    try {
+      Object.assign(process.env, tlsEnv);
+      const tlsKeys = Object.keys(tlsEnv);
+      const cliEnv = buildCliSubprocessEnv();
+      const pluginEnv = buildPluginSubprocessEnv();
+      expect(Object.fromEntries(tlsKeys.map((key) => [key, cliEnv[key]]))).toEqual(
+        Object.fromEntries(tlsKeys.map((key) => [key, pluginEnv[key]])),
+      );
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
+  it("subprocess-env NO_PROXY local hosts are in sync for CLI and plugin", () => {
+    for (const withLocalNoProxy of [withCliLocalNoProxy, withPluginLocalNoProxy]) {
+      const env: Record<string, string> = {
+        HTTP_PROXY: "http://proxy.example.com:8888",
+        NO_PROXY: "corp.internal,localhost",
+        no_proxy: "corp.internal,localhost",
+      };
+
+      withLocalNoProxy(env);
+
+      expect(env.NO_PROXY).toBe("corp.internal,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
+      expect(env.no_proxy).toBe("corp.internal,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
+    }
+  });
+
+  it("subprocess env builder does not spread full process.env into subprocesses", () => {
+    const previous = {
+      NVIDIA_API_KEY: process.env.NVIDIA_API_KEY,
+      PATH: process.env.PATH,
+    };
+    try {
+      process.env.NVIDIA_API_KEY = "nvapi-secret-should-not-leak";
+      process.env.PATH = `/tmp/nemoclaw-fake-bin:${process.env.PATH || ""}`;
+      const env = buildCliSubprocessEnv();
+      expect(env.NVIDIA_API_KEY).toBeUndefined();
+      expect(env.PATH).toContain("/tmp/nemoclaw-fake-bin");
+    } finally {
+      if (previous.NVIDIA_API_KEY === undefined) {
+        delete process.env.NVIDIA_API_KEY;
+      } else {
+        process.env.NVIDIA_API_KEY = previous.NVIDIA_API_KEY;
+      }
+      if (previous.PATH === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previous.PATH;
+      }
+    }
+  });
+
+  it("onboard curl probes use explicit timeouts", () => {
+    expect(getCurlTimingArgs()).toEqual(["--connect-timeout", "10", "--max-time", "60"]);
+  });
+
+});

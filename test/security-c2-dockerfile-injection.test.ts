@@ -1,0 +1,167 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Security regression test: C-2 — CHAT_UI_URL Python code injection in Dockerfile.
+//
+// The vulnerable pattern interpolates Docker build-args directly into a
+// python3 -c source string. A single-quote in the value closes the Python
+// string literal and allows arbitrary code execution at image build time.
+//
+// The fixed pattern reads values via os.environ (data, not source code).
+
+import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const DOCKERFILE = path.join(import.meta.dirname, "..", "Dockerfile");
+
+function runPython(src: string, env: Record<string, string | undefined> = {}) {
+  return spawnSync("python3", ["-c", src], {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, ...env },
+    timeout: 5000,
+  });
+}
+
+// Simulate what Docker ARG substitution produces (the VULNERABLE pattern)
+function vulnerableSource(chatUiUrlValue: string): string {
+  return (
+    "import json, os, secrets; " +
+    "from urllib.parse import urlparse; " +
+    `chat_ui_url = '${chatUiUrlValue}'; ` +
+    "parsed = urlparse(chat_ui_url); " +
+    "print(repr(chat_ui_url))"
+  );
+}
+
+// Simulate the FIXED pattern (env var, no source interpolation)
+function fixedSource(): string {
+  return (
+    "import json, os, secrets; " +
+    "from urllib.parse import urlparse; " +
+    "chat_ui_url = os.environ['CHAT_UI_URL']; " +
+    "parsed = urlparse(chat_ui_url); " +
+    "print(repr(chat_ui_url))"
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. PoC — vulnerable pattern allows code injection
+// ═══════════════════════════════════════════════════════════════════
+describe("C-2 PoC: vulnerable pattern (ARG interpolation into python3 -c)", () => {
+  it("benign URL works in the vulnerable pattern (baseline)", () => {
+    const src = vulnerableSource("http://127.0.0.1:18789");
+    const result = runPython(src);
+    expect(result.status).toBe(0);
+    expect(result.stdout.includes("127.0.0.1")).toBeTruthy();
+  });
+
+  it("single-quote in URL causes SyntaxError", () => {
+    const src = vulnerableSource("http://x'.evil.com");
+    const result = runPython(src);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr.includes("SyntaxError")).toBeTruthy();
+  });
+
+  it("injection payload writes canary file — arbitrary Python executes", () => {
+    const canary = path.join(os.tmpdir(), `nemoclaw-c2-poc-${Date.now()}`);
+    try {
+      const payload = `http://x'; open('${canary}','w').write('PWNED') #`;
+      const src = vulnerableSource(payload);
+      runPython(src);
+
+      expect(fs.existsSync(canary)).toBeTruthy();
+      expect(fs.readFileSync(canary, "utf-8")).toBe("PWNED");
+    } finally {
+      try {
+        fs.unlinkSync(canary);
+      } catch {
+        /* cleanup */
+      }
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. Fix verification — env var pattern treats all payloads as data
+// ═══════════════════════════════════════════════════════════════════
+describe("C-2 fix: env var pattern (os.environ) is safe", () => {
+  it("benign URL works through env var", () => {
+    const result = runPython(fixedSource(), { CHAT_UI_URL: "http://127.0.0.1:18789" });
+    expect(result.status).toBe(0);
+    expect(result.stdout.includes("127.0.0.1")).toBeTruthy();
+  });
+
+  it("single-quote in URL is treated as data, not a code boundary", () => {
+    const result = runPython(fixedSource(), { CHAT_UI_URL: "http://x'.evil.com" });
+    expect(result.status).toBe(0);
+    expect(result.stdout.includes("x'.evil.com")).toBeTruthy();
+  });
+
+  it("injection payload does NOT execute — URL is inert data", () => {
+    const canary = path.join(os.tmpdir(), `nemoclaw-c2-fixed-${Date.now()}`);
+    try {
+      const payload = `http://x'; open('${canary}','w').write('PWNED') #`;
+      const result = runPython(fixedSource(), { CHAT_UI_URL: payload });
+
+      expect(result.status).toBe(0);
+      expect(fs.existsSync(canary)).toBe(false);
+    } finally {
+      try {
+        fs.unlinkSync(canary);
+      } catch {
+        /* cleanup */
+      }
+    }
+  });
+
+  it("semicolons and import statements in URL are literal data", () => {
+    const dangerous = "http://x; import subprocess; subprocess.run(['id'])";
+    const result = runPython(fixedSource(), { CHAT_UI_URL: dangerous });
+    // The URL is treated as data — urlparse may or may not raise, but
+    // the key property is that no code injection occurs. Check stdout or stderr
+    // does NOT contain evidence of os.system/subprocess execution.
+    const combined = result.stdout + result.stderr;
+    expect(!combined.includes("uid=")).toBeTruthy();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. Gateway auth hardening — no hardcoded insecure defaults (#117)
+// ═══════════════════════════════════════════════════════════════════
+describe("Gateway auth hardening: Dockerfile must not hardcode insecure auth defaults", () => {
+  it("NEMOCLAW_DISABLE_DEVICE_AUTH is promoted to ENV before the Python RUN layer", () => {
+    const src = fs.readFileSync(DOCKERFILE, "utf-8");
+    const lines = src.split("\n");
+    let promoted = false;
+    let inEnvBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*FROM\b/.test(line)) {
+        promoted = false;
+        inEnvBlock = false;
+      }
+      if (/^\s*ENV\b/.test(line)) {
+        inEnvBlock = true;
+      }
+      if (inEnvBlock && /NEMOCLAW_DISABLE_DEVICE_AUTH[=\s]/.test(line)) {
+        promoted = true;
+      }
+      if (inEnvBlock && !/\\\s*$/.test(line)) {
+        inEnvBlock = false;
+      }
+      if (
+        /^\s*RUN\b.*python3\s+\/usr\/local\/lib\/nemoclaw\/generate-openclaw-config\.py\b/.test(
+          line,
+        )
+      ) {
+        expect(promoted).toBeTruthy();
+        return;
+      }
+    }
+    expect(promoted).toBeTruthy();
+  });
+});

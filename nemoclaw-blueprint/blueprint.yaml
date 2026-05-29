@@ -2,15 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 
 version: "0.1.0"
-min_openshell_version: "0.1.0"
-min_openclaw_version: "2026.3.0"
-digest: ""  # Computed at release time
+min_openshell_version: "0.0.44"
+max_openshell_version: "0.0.44"
+min_openclaw_version: "2026.3.11"
+# Mirrors the components.sandbox.image manifest digest below. Lets a
+# downstream consumer (or release tooling) verify the blueprint declares
+# a specific sandbox image without parsing the components tree, and
+# blocks the trivially-bypassable case where someone bumps the pinned
+# image but forgets the top-level field. Release tooling should rewrite
+# both fields together. See #1438.
+digest: "sha256:b3d832b596ab6b7184a9dcb4ae93337ca32851a4f93b00765cc12de26baa3a9a"
 
 profiles:
   - default
   - ncp
   - nim-local
   - vllm
+  - routed
 
 description: |
   NemoClaw blueprint: orchestrates OpenClaw sandbox creation, migration,
@@ -18,10 +26,28 @@ description: |
 
 components:
   sandbox:
-    image: "ghcr.io/nvidia/openshell-community/sandboxes/openclaw:latest"
+    # Pinned to a specific image digest so a future registry compromise or an
+    # accidental :latest force-push cannot silently swap the sandbox image.
+    # Ref: #1438. The digest below was the resolved sha256 of the :latest tag
+    # at the time of this commit; release tooling should bump it together with
+    # the top-level `digest:` field on every release.
+    image: "ghcr.io/nvidia/openshell-community/sandboxes/openclaw@sha256:b3d832b596ab6b7184a9dcb4ae93337ca32851a4f93b00765cc12de26baa3a9a"
     name: "openclaw"
     forward_ports:
       - 18789
+    resource_profiles:
+      creator:
+        cpu: "50%"
+        memory: "50%"
+      gamer:
+        cpu: "25%"
+        memory: "25%"
+      game-developer:
+        cpu: "60%"
+        memory: "60%"
+      developer:
+        cpu: "75%"
+        memory: "75%"
 
   inference:
     profiles:
@@ -45,14 +71,31 @@ components:
         endpoint: "http://nim-service.local:8000/v1"
         model: "nvidia/nemotron-3-super-120b-a12b"
         credential_env: "NIM_API_KEY"
+        timeout_secs: 180
 
       vllm:
         provider_type: "openai"
         provider_name: "vllm-local"
         endpoint: "http://localhost:8000/v1"
-        model: "nvidia/nemotron-3-nano-30b-a3b"
+        # HF repo id (not the NIM catalog name); vLLM must be started with
+        # --trust-remote-code for models that ship custom code.
+        model: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
         credential_env: "OPENAI_API_KEY"
         credential_default: "dummy"
+        timeout_secs: 180
+
+      routed:
+        provider_type: "openai"
+        provider_name: "nvidia-router"
+        endpoint: "http://localhost:4000/v1"
+        model: "nvidia-routed"
+        credential_env: "NVIDIA_API_KEY"
+        timeout_secs: 180
+
+  router:
+    enabled: true
+    port: 4000
+    pool_config_path: "router/pool-config.yaml"
 
   policy:
     base: "sandboxes/openclaw/policy.yaml"
@@ -62,4 +105,4 @@ components:
         endpoints:
           - host: "nim-service.local"
             port: 8000
-            protocol: rest
+            access: full
