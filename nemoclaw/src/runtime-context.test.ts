@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NemoClawState } from "./blueprint/state.js";
 import type { NemoClawConfig, OpenClawPluginApi } from "./index.js";
@@ -10,9 +13,14 @@ vi.mock("./blueprint/state.js", () => ({
 }));
 
 import { loadState } from "./blueprint/state.js";
-import { getRuntimeSummary, registerRuntimeContext } from "./runtime-context.js";
+import { getRuntimeSummary, getWebToolAccess, registerRuntimeContext } from "./runtime-context.js";
 
 const mockedLoadState = vi.mocked(loadState);
+
+const DENY_LINE =
+  "arbitrary outbound network is deny-by-default — you do NOT have unrestricted internet or host access";
+
+const NO_WEB = { searchEnabled: false, searchProvider: null, fetchEnabled: false } as const;
 
 const defaultConfig: NemoClawConfig = {
   blueprintVersion: "latest",
@@ -72,29 +80,67 @@ function createMockApi(): MockOpenClawPluginApi {
   } as MockOpenClawPluginApi;
 }
 
+describe("getWebToolAccess", () => {
+  it("reads enabled web tools + provider from openclaw.json", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rtc-"));
+    const cfg = path.join(dir, "openclaw.json");
+    fs.writeFileSync(
+      cfg,
+      JSON.stringify({
+        tools: { web: { search: { enabled: true, provider: "brave" }, fetch: { enabled: true } } },
+      }),
+    );
+    expect(getWebToolAccess(cfg)).toEqual({
+      searchEnabled: true,
+      searchProvider: "brave",
+      fetchEnabled: true,
+    });
+  });
+
+  it("returns all-disabled when the config is missing or unreadable", () => {
+    expect(getWebToolAccess(path.join(os.tmpdir(), "does-not-exist-openclaw.json"))).toEqual(NO_WEB);
+  });
+});
+
 describe("getRuntimeSummary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedLoadState.mockReturnValue(blankState());
   });
 
-  it("returns static deny-by-default context for the configured sandbox", async () => {
-    const summary = await getRuntimeSummary(defaultConfig);
+  it("returns deny-by-default context with no web tools for the configured sandbox", async () => {
+    const summary = await getRuntimeSummary(defaultConfig, NO_WEB);
 
     expect(summary.sandboxName).toBe("openclaw");
     expect(summary.sandboxPhase).toBeNull();
-    expect(summary.networkLines).toContain(
-      "outbound network is deny-by-default; assume no arbitrary internet access",
-    );
+    expect(summary.networkLines).toContain(DENY_LINE);
+    expect(summary.networkLines.some((l) => l.includes("web search IS available"))).toBe(false);
+    expect(summary.networkLines.some((l) => l.includes("web_fetch is allowlist-only"))).toBe(false);
     expect(summary.filesystemLines).toContain(
       "filesystem/process access is sandboxed; do not assume host-level access",
     );
   });
 
+  it("advertises web_search and the web_fetch allowlist when those tools are enabled", async () => {
+    const summary = await getRuntimeSummary(defaultConfig, {
+      searchEnabled: true,
+      searchProvider: "brave",
+      fetchEnabled: true,
+    });
+
+    expect(summary.networkLines).toContain(DENY_LINE); // deny-by-default still the baseline
+    expect(summary.networkLines.some((l) => l.includes("web search IS available") && l.includes("brave"))).toBe(true);
+    expect(
+      summary.networkLines.some(
+        (l) => l.includes("web_fetch is allowlist-only") && l.includes("allow-listed"),
+      ),
+    ).toBe(true);
+  });
+
   it("prefers the persisted sandbox name when available", async () => {
     mockedLoadState.mockReturnValue(blankState({ sandboxName: "my-assistant" }));
 
-    const summary = await getRuntimeSummary(defaultConfig);
+    const summary = await getRuntimeSummary(defaultConfig, NO_WEB);
 
     expect(summary.sandboxName).toBe("my-assistant");
   });
@@ -104,7 +150,7 @@ describe("getRuntimeSummary", () => {
       throw new Error("state unavailable");
     });
 
-    const summary = await getRuntimeSummary(defaultConfig);
+    const summary = await getRuntimeSummary(defaultConfig, NO_WEB);
 
     expect(summary.sandboxName).toBe("openclaw");
   });
@@ -124,7 +170,7 @@ describe("registerRuntimeContext", () => {
     expect(api.on).toHaveBeenCalledWith("before_prompt_build", expect.any(Function));
   });
 
-  it("prepends static NemoClaw runtime context", async () => {
+  it("prepends NemoClaw runtime context with the expected sections", async () => {
     const api = createMockApi();
     registerRuntimeContext(api, defaultConfig);
 
@@ -136,6 +182,7 @@ describe("registerRuntimeContext", () => {
     expect(result.prependContext).toContain('OpenShell sandbox "openclaw"');
     expect(result.prependContext).toContain("Network policy:");
     expect(result.prependContext).toContain("Filesystem policy:");
+    expect(result.prependContext).toContain("Behavior:");
     expect(result.prependContext).toContain("</nemoclaw-runtime>");
   });
 
