@@ -822,11 +822,22 @@ def build_config(env: dict | None = None) -> dict:
     tools_web["fetch"] = {"enabled": True, "useTrustedEnvProxy": True}
 
     if env.get("NEMOCLAW_WEB_SEARCH_ENABLED", "") == "1":
+        # OpenClaw 2026.5.x moved provider-owned web-search config (the API key)
+        # out of tools.web.search into plugins.entries.<provider>.config.webSearch.
+        # tools.web.search now holds only the tool toggle + provider selection;
+        # putting the apiKey here trips "legacy config keys" + "provider not
+        # available: brave" and fails config validation at build time.
         tools_web["search"] = {
             "enabled": True,
             "provider": "brave",
-            "apiKey": "openshell:resolve:env:BRAVE_API_KEY",
         }
+        brave_config = (
+            config.setdefault("plugins", {})
+            .setdefault("entries", {})
+            .setdefault("brave", {})
+            .setdefault("config", {})
+        )
+        brave_config["webSearch"] = {"apiKey": "openshell:resolve:env:BRAVE_API_KEY"}
 
     return config
 
