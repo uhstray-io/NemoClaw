@@ -20,6 +20,7 @@ Thumbs.db
 # Project-specific
 .nemoclaw-maintainer/
 draft_newsletter_*
+proposals/
 research/
 specs/
 vdr-notes/
