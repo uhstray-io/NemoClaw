@@ -98,7 +98,9 @@ describe("getWebToolAccess", () => {
   });
 
   it("returns all-disabled when the config is missing or unreadable", () => {
-    expect(getWebToolAccess(path.join(os.tmpdir(), "does-not-exist-openclaw.json"))).toEqual(NO_WEB);
+    expect(getWebToolAccess(path.join(os.tmpdir(), "does-not-exist-openclaw.json"))).toEqual(
+      NO_WEB,
+    );
   });
 });
 
@@ -129,12 +131,28 @@ describe("getRuntimeSummary", () => {
     });
 
     expect(summary.networkLines).toContain(DENY_LINE); // deny-by-default still the baseline
-    expect(summary.networkLines.some((l) => l.includes("web search IS available") && l.includes("brave"))).toBe(true);
+    expect(
+      summary.networkLines.some(
+        (l) => l.includes("web search IS available") && l.includes("brave"),
+      ),
+    ).toBe(true);
     expect(
       summary.networkLines.some(
         (l) => l.includes("web_fetch is allowlist-only") && l.includes("allow-listed"),
       ),
     ).toBe(true);
+  });
+
+  it("always includes the untrusted-data trust boundary and host-gated-action posture", async () => {
+    const summary = await getRuntimeSummary(defaultConfig, NO_WEB);
+
+    // (b) ingested external content + memory-read text are untrusted DATA, not instructions
+    expect(summary.trustBoundaryLines.some((l) => l.includes("untrusted DATA"))).toBe(true);
+    expect(summary.trustBoundaryLines.some((l) => l.includes("memory/ files"))).toBe(true);
+    // (c) destructive/host actions are confirmation-gated host-side
+    expect(summary.trustBoundaryLines.some((l) => l.includes("host-side human approval"))).toBe(
+      true,
+    );
   });
 
   it("prefers the persisted sandbox name when available", async () => {
@@ -182,6 +200,8 @@ describe("registerRuntimeContext", () => {
     expect(result.prependContext).toContain('OpenShell sandbox "openclaw"');
     expect(result.prependContext).toContain("Network policy:");
     expect(result.prependContext).toContain("Filesystem policy:");
+    expect(result.prependContext).toContain("Trust boundary:");
+    expect(result.prependContext).toContain("untrusted DATA");
     expect(result.prependContext).toContain("Behavior:");
     expect(result.prependContext).toContain("</nemoclaw-runtime>");
   });
