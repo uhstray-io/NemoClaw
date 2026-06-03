@@ -4,9 +4,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GITHUB_PROVIDER,
   mintAgentKeyWithAccessToken,
   pollForToken,
   refreshAccessTokenWithRefreshToken,
+  requestDeviceCode,
 } from "../../dist/lib/oauth-device-code";
 
 describe("pollForToken", () => {
@@ -144,5 +146,99 @@ describe("mintAgentKeyWithAccessToken", () => {
       min_ttl_seconds: 120,
     });
     expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("GitHub provider (multi-provider device flow)", () => {
+  it("requests the device code from the GitHub App endpoint", async () => {
+    const calls: string[] = [];
+    await requestDeviceCode({
+      provider: GITHUB_PROVIDER,
+      clientId: "gh-client",
+      fetch: (async (url) => {
+        calls.push(String(url));
+        return new Response(
+          JSON.stringify({
+            device_code: "d",
+            user_code: "U",
+            verification_uri: "https://github.com/login/device",
+            expires_in: 900,
+            interval: 1,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as typeof fetch,
+    });
+
+    expect(calls[0]).toBe("https://github.com/login/device/code");
+  });
+
+  it("accepts a token response without a refresh_token (expiring tokens off)", async () => {
+    const calls: string[] = [];
+    const token = await pollForToken(
+      {
+        device_code: "d",
+        user_code: "U",
+        verification_uri: "https://github.com/login/device",
+        expires_in: 900,
+        interval: 1,
+      },
+      {
+        provider: GITHUB_PROVIDER,
+        clientId: "gh-client",
+        sleep: async () => {},
+        log: () => {},
+        fetch: (async (url) => {
+          calls.push(String(url));
+          return new Response(
+            JSON.stringify({
+              access_token: "gho_x",
+              expires_in: 28800,
+              token_type: "bearer",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }) as typeof fetch,
+      },
+    );
+
+    expect(calls[0]).toBe("https://github.com/login/oauth/access_token");
+    expect(token.access_token).toBe("gho_x");
+    expect(token.refresh_token).toBeUndefined();
+  });
+
+  it("refreshes via the body form with client_secret and no Nous header", async () => {
+    const calls: Array<{ url: string; body: string; nousHeader: string | null }> = [];
+    const token = await refreshAccessTokenWithRefreshToken("ghr_1", {
+      provider: GITHUB_PROVIDER,
+      clientId: "gh-client",
+      clientSecret: "gh-secret",
+      fetch: (async (url, init) => {
+        const headers = new Headers(init?.headers);
+        calls.push({
+          url: String(url),
+          body: String(init?.body ?? ""),
+          nousHeader: headers.get("x-nous-refresh-token"),
+        });
+        return new Response(
+          JSON.stringify({
+            access_token: "gho_2",
+            refresh_token: "ghr_2",
+            expires_in: 28800,
+            token_type: "bearer",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as typeof fetch,
+    });
+
+    expect(token.access_token).toBe("gho_2");
+    expect(calls[0]?.url).toBe("https://github.com/login/oauth/access_token");
+    const body = new URLSearchParams(calls[0]?.body);
+    expect(body.get("grant_type")).toBe("refresh_token");
+    expect(body.get("refresh_token")).toBe("ghr_1");
+    expect(body.get("client_secret")).toBe("gh-secret");
+    expect(body.get("client_id")).toBe("gh-client");
+    expect(calls[0]?.nousHeader).toBeNull();
   });
 });
