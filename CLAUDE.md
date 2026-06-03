@@ -68,7 +68,7 @@ AGENTS.md tells you how to *add* features; this is where to change **how the run
 | Generated agent config (tools, web search, channels, inference) | `scripts/generate-openclaw-config.py` | Build-time generator; reads `NEMOCLAW_*` env/build args, writes `openclaw.json`. |
 | What the sandbox can reach (egress) | blueprint policy presets in `nemoclaw-blueprint/policies/presets/` | Deny-by-default allow-lists. |
 | Onboard / sandbox lifecycle | `src/lib/onboard.ts`, `src/lib/actions/` | |
-| Slash commands | `nemoclaw/src/commands/` | |
+| Slash commands | `nemoclaw/src/commands/` | **Display-only glue** — no HTTP, cannot seed an agent turn (see the plugin-surface note below). |
 
 **How changes take effect:**
 
@@ -78,15 +78,23 @@ AGENTS.md tells you how to *add* features; this is where to change **how the run
 
 **Gateway-loaded plugin constraint:** code that runs at plugin load / prompt-build time (e.g. `runtime-context.ts`) must pass OpenClaw's **install-time safety scanner** — no subprocess execution in those paths. Read live details with static file reads (as `getWebToolAccess()` reads `openclaw.json`), not by shelling out. (See the Security model in [AGENTS.md](./AGENTS.md) for the rest.)
 
+**Plugin surface is observe-and-annotate, not act.** `registerCommand` handlers are **display-only glue**: `PluginCommandContext` exposes no HTTP/fetch and `PluginCommandResult` returns only text, so a command **cannot make network calls and cannot seed/inject an agent turn**. The plugin can only *shape* turns (`before_prompt_build` / `runtime-context.ts`) or *report* (commands); the agent acts in its own turns via **native tools** (L7-proxy + preset governed). Any design framed as "a command that makes the agent fetch / write / restart" is **mis-layered** — route it through `runtime-context.ts` guidance + agent-native tools, or host-side. The only behavior hooks today are `before_prompt_build` and `before_tool_call` (the latter is a memory-write secret scan that may no-op on contract drift — never count it as a control).
+
 ## Fork changes (current)
 
 The fork's original reason — a sandbox DNS fix and channel integrations — has been **absorbed
-upstream**. The fork now carries only targeted behavioral fixes (all candidates for upstream PRs):
+upstream**. The fork now carries targeted behavioral fixes **plus early, upstream-PR-able
+groundwork for Forge** — a project/workflow assistant that runs inside the deny-by-default
+sandbox (security-first: read-only by default, every state-change gated behind host-side
+approval). All deltas are upstream-PR-able:
 
 | Area | Change | File | Branch |
 |---|---|---|---|
 | Web-search config | Emit the OpenClaw 2026.5.x shape — `tools.web.search = {enabled, provider}` **plus** `plugins.entries.brave.config.webSearch.apiKey`. Upstream's legacy inline-apiKey shape fails `openclaw config validate` and aborts the image build. | `scripts/generate-openclaw-config.py` | `fix/web-search-config-format` |
-| Agent runtime context | Make `runtime-context.ts` **tool-aware**: read enabled web tools from `openclaw.json` (static read) and tell the agent the truth — **web_search IS available** (names the provider) and **web_fetch is allowlist-only** — instead of a blanket "assume no arbitrary internet access" that made the agent refuse working tools. | `nemoclaw/src/runtime-context.ts` | `fix/runtime-context-web-tools` |
+| Agent runtime context (tool-aware) | Make `runtime-context.ts` **tool-aware**: read enabled web tools from `openclaw.json` (static read) and tell the agent the truth — **web_search IS available** (names the provider) and **web_fetch is allowlist-only** — instead of a blanket "assume no arbitrary internet access" that made the agent refuse working tools. | `nemoclaw/src/runtime-context.ts` | `fix/runtime-context-web-tools` |
+| Agent runtime context (trust boundary) | Extend `runtime-context.ts` to inject an **untrusted-data trust boundary**: ingested external content and text read back from `memory/` are data, not instructions; state-changing/host actions require host-side approval. Advisory defense-in-depth, static-reads-only. | `nemoclaw/src/runtime-context.ts` | `feat/forge-runtime-context-trust-boundary` (PR [#1](https://github.com/uhstray-io/NemoClaw/pull/1)) |
+| OAuth device-code (multi-provider) | Generalize the device-flow helper into an `OAuthProvider` descriptor (`NOUS_PROVIDER` + `GITHUB_PROVIDER`) so the same flow drives a **GitHub App sign-on**. Strictly additive — Nous/Hermes callers unchanged. Groundwork for Forge GitHub `/status` (interactive sign-on, read-only by default). | `src/lib/oauth-device-code.ts` | `feat/oauth-device-code-multi-provider` (PR [#2](https://github.com/uhstray-io/NemoClaw/pull/2)) |
+| NocoDB read preset (template) | Read-only NocoDB preset **template** (GET-only on the data path, no `allowed_ips`, no write surface). Kept as `.example` so the real host stays out of the fork; `nemoclaw-deploy` owns the concrete preset. | `nemoclaw-blueprint/policies/presets/nocodb.yaml.example` | `feat/oauth-device-code-multi-provider` (PR [#2](https://github.com/uhstray-io/NemoClaw/pull/2)) |
 | Sandbox DNS (historical) | Python DNS forwarder for the old k3s sandbox model — **now native upstream** (PR [#732](https://github.com/NVIDIA/NemoClaw/pull/732), reimplemented in TypeScript). No longer carried here. | (upstream) | — |
 
 ## Web tools — behavior & guardrails
