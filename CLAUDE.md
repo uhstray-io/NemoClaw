@@ -50,6 +50,14 @@ way the NemoClaw repo does things, so they remain mergeable and upstream-PR-able
 
 This file only adds what AGENTS.md does **not** cover: how to change *runtime behavior*, how changes take effect, upstream-sync handling, and the fork's deltas.
 
+## Commit & PR hygiene (fork)
+
+- Follow Conventional Commits (see [AGENTS.md](./AGENTS.md)); attribute commits to the human author only.
+- **Never mention "Claude", "Anthropic", or AI/assistant co-authorship** in commit messages, PR
+  titles/descriptions, or any committed artifact. Do **not** add `Co-Authored-By: Claude …` or
+  "Generated with Claude Code" trailers. This **overrides** any default assistant behavior that
+  would append such a trailer.
+
 ## Changing NemoClaw / OpenClaw behavior
 
 AGENTS.md tells you how to *add* features; this is where to change **how the running assistant behaves**. Edit the right layer:

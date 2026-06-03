@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# NocoDB read-only access — TEMPLATE.
+#
+# Why this is a `.example` and not a live preset:
+#   The real NocoDB FQDN must NOT be committed to this fork (it is
+#   uhstray-specific infrastructure). This template documents the *safe shape*;
+#   `nemoclaw-deploy` owns the concrete `nocodb.yaml` (with the real public
+#   host) and applies it at deploy time via `nemoclaw sandbox policy add`.
+#   Copy this file to `nocodb.yaml` in the deploy repo and replace the
+#   placeholder host below.
+#
+# Security shape (forge-integration-plan G-5, read identity G-2, write gate G-3):
+#   * NocoDB is external-public  -> Tier B *direct* read preset.
+#   * NO `allowed_ips` block — the host is public, not host-gateway/RFC1918.
+#   * GET-only, scoped to the data path. NEVER the `/**` multi-verb shape that
+#     `jira.yaml` / `discord.yaml` use — that would hand an injected prompt a
+#     write surface.
+#   * Any WRITE (e.g. PATCH a status field) is a SEPARATE preset + a write-scoped
+#     token under the write identity, and MUST NOT ship until the host-side
+#     human-approval gate (G-3) exists. Do not add write methods here.
+
+preset:
+  name: nocodb
+  description: "NocoDB read-only data access (template — real host is deploy-owned)"
+
+network_policies:
+  nocodb:
+    name: nocodb
+    endpoints:
+      # Replace with the real public FQDN in nemoclaw-deploy. Public host, so
+      # no allowed_ips (that block is only for host-gateway/RFC1918 targets).
+      - host: nocodb.example.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          # Read-only on the data path. Narrow to the specific table/base in
+          # the deploy copy if possible; never widen to `/**` or add verbs.
+          - allow: { method: GET, path: "/api/v2/tables/**" }
+          - allow: { method: GET, path: "/api/v2/meta/**" }
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/node }

@@ -143,6 +143,33 @@ selectFromList(items, options)
   });
 }
 
+describe("nocodb.yaml.example (P2.1 NocoDB read template)", () => {
+  const tpl = parseRepoYaml(
+    "nemoclaw-blueprint/policies/presets/nocodb.yaml.example",
+  );
+
+  it("declares the nocodb read preset", () => {
+    expect(tpl.preset?.name).toBe("nocodb");
+  });
+
+  it("allows only GET on the public NocoDB host — no write surface, no allowed_ips", () => {
+    const endpoints = tpl.network_policies?.nocodb?.endpoints ?? [];
+    expect(endpoints.length).toBeGreaterThan(0);
+    for (const ep of endpoints) {
+      expect(ep.port).toBe(443);
+      expect(ep.protocol).toBe("rest");
+      // External-public (G-5): no allowed_ips block (that is host-gateway/RFC1918 only).
+      expect(ep.allowed_ips).toBeUndefined();
+      const rules = ep.rules ?? [];
+      expect(rules.length).toBeGreaterThan(0);
+      for (const rule of rules) {
+        expect(rule.allow?.method).toBe("GET"); // read-only — no write surface
+        expect(rule.allow?.path).not.toBe("/**"); // scoped, never wildcard
+      }
+    }
+  });
+});
+
 describe("policies", () => {
   describe("listPresets", () => {
     it("returns all 20 presets", () => {

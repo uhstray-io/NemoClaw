@@ -24,6 +24,67 @@ const POLL_INTERVAL_MAX_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * OAuth device-flow provider descriptor. Parameterizes the endpoint paths and
+ * refresh style so the same flow drives the Nous portal (the original
+ * consumer) and a GitHub App, without forking the logic. Defaults target Nous.
+ */
+export interface OAuthProvider {
+  /** Base origin, e.g. https://portal.nousresearch.com or https://github.com */
+  baseUrl: string;
+  /** Device-code request path appended to baseUrl. */
+  deviceCodePath: string;
+  /** Token (and refresh) path appended to baseUrl. */
+  tokenPath: string;
+  /** OAuth client id. */
+  clientId: string;
+  /** Optional scope sent on the device-code request. */
+  scope?: string;
+  /**
+   * If set, the refresh grant sends the refresh token in this header instead
+   * of the form body (Nous uses `x-nous-refresh-token`). If unset, the refresh
+   * token — and `client_secret` when provided — go in the form body, the
+   * standard OAuth shape a GitHub App uses.
+   */
+  refreshTokenInHeader?: string;
+  /**
+   * Whether a successful device-code token response MUST include a
+   * refresh_token. Nous always issues one; a GitHub App only issues one when
+   * expiring user-to-server tokens are enabled, so GitHub sets this false.
+   */
+  refreshTokenRequired?: boolean;
+  /** Human-facing label for prompts/logs (e.g. "Hermes Provider", "GitHub"). */
+  label?: string;
+}
+
+/** Nous portal device flow — the defaults preserve the original behavior. */
+export const NOUS_PROVIDER: OAuthProvider = {
+  baseUrl: DEFAULT_PORTAL_BASE_URL,
+  deviceCodePath: "/api/oauth/device/code",
+  tokenPath: "/api/oauth/token",
+  clientId: DEFAULT_CLIENT_ID,
+  scope: DEFAULT_SCOPE,
+  refreshTokenInHeader: "x-nous-refresh-token",
+  refreshTokenRequired: true,
+  label: "Hermes Provider",
+};
+
+/**
+ * GitHub App device flow. `clientId` is supplied per deployment (a GitHub App
+ * client id is non-secret). Repo/permission scope is enforced by the App
+ * installation, not an OAuth scope string. Refresh (when expiring user tokens
+ * are enabled) is standard body-form and additionally needs the App
+ * client_secret (host-held) — pass it via DeviceCodeFlowOptions.clientSecret.
+ */
+export const GITHUB_PROVIDER: OAuthProvider = {
+  baseUrl: "https://github.com",
+  deviceCodePath: "/login/device/code",
+  tokenPath: "/login/oauth/access_token",
+  clientId: "",
+  refreshTokenRequired: false,
+  label: "GitHub",
+};
+
 export interface DeviceCodeResponse {
   device_code: string;
   user_code: string;
@@ -53,8 +114,12 @@ export interface AgentKeyResponse {
 }
 
 export interface DeviceCodeFlowOptions {
+  /** Provider descriptor (paths, refresh style). Defaults to NOUS_PROVIDER. */
+  provider?: OAuthProvider;
   portalBaseUrl?: string;
   clientId?: string;
+  /** Client secret for body-form refresh grants (e.g. a GitHub App). */
+  clientSecret?: string;
   scope?: string;
   timeoutSeconds?: number;
   requestTimeoutMs?: number;
@@ -166,13 +231,16 @@ export async function requestDeviceCode(
   opts: DeviceCodeFlowOptions = {},
 ): Promise<DeviceCodeResponse> {
   const fetchImpl = opts.fetch ?? fetch;
-  const portalBaseUrl = opts.portalBaseUrl ?? DEFAULT_PORTAL_BASE_URL;
-  const clientId = opts.clientId ?? DEFAULT_CLIENT_ID;
-  const scope = opts.scope ?? DEFAULT_SCOPE;
+  const provider = opts.provider ?? NOUS_PROVIDER;
+  const baseUrl = opts.portalBaseUrl ?? provider.baseUrl;
+  const clientId = opts.clientId ?? provider.clientId;
+  const scope = opts.scope ?? provider.scope;
 
+  const body: Record<string, string> = { client_id: clientId };
+  if (scope) body.scope = scope;
   const resp = await postForm(
-    `${portalBaseUrl}/api/oauth/device/code`,
-    { client_id: clientId, scope },
+    `${baseUrl}${provider.deviceCodePath}`,
+    body,
     fetchImpl,
     opts.requestTimeoutMs,
   );
@@ -208,8 +276,9 @@ export async function pollForToken(
   const fetchImpl = opts.fetch ?? fetch;
   const sleep = opts.sleep ?? defaultSleep;
   const now = opts.now ?? (() => Date.now());
-  const portalBaseUrl = opts.portalBaseUrl ?? DEFAULT_PORTAL_BASE_URL;
-  const clientId = opts.clientId ?? DEFAULT_CLIENT_ID;
+  const provider = opts.provider ?? NOUS_PROVIDER;
+  const baseUrl = opts.portalBaseUrl ?? provider.baseUrl;
+  const clientId = opts.clientId ?? provider.clientId;
   const log = opts.log ?? ((line: string) => console.error(line));
   const deadline =
     now() + (opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
@@ -224,7 +293,7 @@ export async function pollForToken(
     }
 
     const resp = await postForm(
-      `${portalBaseUrl}/api/oauth/token`,
+      `${baseUrl}${provider.tokenPath}`,
       {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         device_code: deviceCode.device_code,
@@ -236,10 +305,11 @@ export async function pollForToken(
 
     if (resp.status === 200) {
       const payload = (await resp.json()) as TokenResponse;
-      if (!payload.access_token || !payload.refresh_token) {
+      const refreshRequired = provider.refreshTokenRequired !== false;
+      if (!payload.access_token || (refreshRequired && !payload.refresh_token)) {
         throw new OAuthError(
           "token_response_missing_tokens",
-          "portal returned no access_token or refresh_token; cannot complete host-side authorization",
+          "token response missing access_token (or required refresh_token); cannot complete host-side authorization",
         );
       }
       return payload;
@@ -278,18 +348,31 @@ export async function refreshAccessTokenWithRefreshToken(
   opts: DeviceCodeFlowOptions = {},
 ): Promise<TokenResponse> {
   const fetchImpl = opts.fetch ?? fetch;
-  const portalBaseUrl = opts.portalBaseUrl ?? DEFAULT_PORTAL_BASE_URL;
-  const clientId = opts.clientId ?? DEFAULT_CLIENT_ID;
+  const provider = opts.provider ?? NOUS_PROVIDER;
+  const baseUrl = opts.portalBaseUrl ?? provider.baseUrl;
+  const clientId = opts.clientId ?? provider.clientId;
+
+  const body: Record<string, string> = {
+    grant_type: "refresh_token",
+    client_id: clientId,
+  };
+  const extraHeaders: Record<string, string> = {};
+  if (provider.refreshTokenInHeader) {
+    // Nous rotates the refresh token via a dedicated header, not the body.
+    extraHeaders[provider.refreshTokenInHeader] = refreshToken;
+  } else {
+    // Standard OAuth refresh (e.g. a GitHub App): refresh token in the body,
+    // plus the client_secret (host-held) when the provider requires it.
+    body.refresh_token = refreshToken;
+    if (opts.clientSecret) body.client_secret = opts.clientSecret;
+  }
 
   const resp = await postForm(
-    `${portalBaseUrl}/api/oauth/token`,
-    {
-      grant_type: "refresh_token",
-      client_id: clientId,
-    },
+    `${baseUrl}${provider.tokenPath}`,
+    body,
     fetchImpl,
     opts.requestTimeoutMs,
-    { "x-nous-refresh-token": refreshToken },
+    extraHeaders,
   );
 
   if (resp.status !== 200) {
@@ -369,15 +452,17 @@ export async function runDeviceCodeFlow(
   opts: DeviceCodeFlowOptions = {},
 ): Promise<TokenResponse> {
   const log = opts.log ?? ((line: string) => console.error(line));
+  const provider = opts.provider ?? NOUS_PROVIDER;
+  const label = provider.label ?? "OAuth";
 
   log("");
-  log("  Requesting device code from portal.nousresearch.com...");
+  log(`  Requesting device code from ${provider.baseUrl}...`);
   const deviceCode = await requestDeviceCode(opts);
   const verificationUri =
     deviceCode.verification_uri_complete ?? deviceCode.verification_uri;
 
   log("");
-  log("  Hermes Provider OAuth");
+  log(`  ${label} OAuth`);
   log("  Open this URL in your browser to approve:");
   log("");
   log(`    ${verificationUri}`);
@@ -394,7 +479,7 @@ export async function runDeviceCodeFlow(
 
   const token = await pollForToken(deviceCode, opts);
   log("");
-  log("  ✓ Hermes Provider authorization complete");
+  log(`  ✓ ${label} authorization complete`);
   log("");
   return token;
 }
@@ -404,6 +489,8 @@ module.exports = {
   DEFAULT_INFERENCE_BASE_URL,
   DEFAULT_CLIENT_ID,
   DEFAULT_SCOPE,
+  NOUS_PROVIDER,
+  GITHUB_PROVIDER,
   OAuthError,
   OAuthTimeoutError,
   requestDeviceCode,
