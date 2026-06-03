@@ -25,6 +25,8 @@ It installs the [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) runtime,
 > The project is shared to gather feedback and enable early experimentation.
 > We welcome issues and discussion from the community while the project evolves.
 
+**uhstray-io fork.** This is a fork of [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) maintained by uhstray-io. It tracks upstream closely and carries small, upstream-PR-able behavioral fixes plus in-progress groundwork for **Forge** — a security-first project/workflow assistant that runs inside the deny-by-default OpenShell sandbox (read-only by default; every state-change gated behind host-side approval). Fork-specific guidance lives in [CLAUDE.md](./CLAUDE.md); the upstream contributor guide is [AGENTS.md](./AGENTS.md).
+
 NemoClaw adds guided onboarding, a hardened blueprint, state management, OpenShell-managed channel messaging, routed inference, and layered protection on top of the [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) runtime. For the full feature list, refer to [Overview](https://docs.nvidia.com/nemoclaw/latest/about/overview.html). For the system diagram, component model, and blueprint lifecycle, refer to [How It Works](https://docs.nvidia.com/nemoclaw/latest/about/how-it-works.html) and [Architecture](https://docs.nvidia.com/nemoclaw/latest/reference/architecture.html).
 
 ## Getting Started
